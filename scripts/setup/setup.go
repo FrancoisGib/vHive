@@ -167,6 +167,16 @@ func SetupGvisorRuntime() error {
 		return err
 	}
 
+	// The options of runsc, read by its shim (ConfigPath in config.toml): its cgroups in those of the pods.
+	runscConfigPath, err := utils.GetVHiveFilePath(path.Join("configs", "gvisor", "runsc.toml"))
+	if !utils.CheckErrorWithMsg(err, "Failed to find the runsc options!\n") {
+		return err
+	}
+	err = utils.CopyToDir(runscConfigPath, "/etc/containerd/", true)
+	if !utils.CheckErrorWithMsg(err, "Failed to install the runsc options!\n") {
+		return err
+	}
+
 	return nil
 }
 

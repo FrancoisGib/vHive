@@ -1,0 +1,7 @@
+# The options of the runsc containerd shim, read from /etc/containerd/runsc.toml (see config.toml).
+#
+# The kubelet of vHive uses the systemd cgroup driver: containerd gives runsc the cgroups of the pods as systemd ones
+# (kubepods-besteffort-pod<uid>.slice:cri-containerd:<id>). Without systemd-cgroup, runsc reads them as cgroupfs paths
+# and creates its cgroups out of the pods, at the root: the pods would not account for their sandboxes (Sentry, gofer).
+[runsc_config]
+  systemd-cgroup = "true"

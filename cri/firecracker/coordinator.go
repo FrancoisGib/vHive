@@ -80,14 +80,22 @@ func (c *coordinator) startVM(ctx context.Context, image, revision string) (*fun
 }
 
 func (c *coordinator) startVMWithEnvironment(ctx context.Context, image, revision string, environment []string) (*funcInstance, error) {
+	return c.startVMWithHook(ctx, image, revision, environment, nil)
+}
+
+// vmHook is called with the id of a VM before it is created or loaded; the function it returns is called once the
+// VM is up, or failed.
+type vmHook func(vmID string) func()
+
+func (c *coordinator) startVMWithHook(ctx context.Context, image, revision string, environment []string, hook vmHook) (*funcInstance, error) {
 	if c.orch != nil && c.orch.GetSnapshotsEnabled() {
 		// Check if snapshot is available
 		if snap, err := c.snapshotManager.AcquireSnapshot(revision); err == nil {
-			return c.orchLoadInstance(ctx, snap)
+			return c.orchLoadInstance(ctx, snap, hook)
 		}
 	}
 
-	return c.orchStartVM(ctx, image, revision, environment)
+	return c.orchStartVM(ctx, image, revision, environment, hook)
 }
 
 func (c *coordinator) stopVM(ctx context.Context, containerID string) error {
@@ -135,8 +143,11 @@ func (c *coordinator) insertActive(containerID string, fi *funcInstance) error {
 	return nil
 }
 
-func (c *coordinator) orchStartVM(ctx context.Context, image, revision string, envVariables []string) (*funcInstance, error) {
+func (c *coordinator) orchStartVM(ctx context.Context, image, revision string, envVariables []string, hook vmHook) (*funcInstance, error) {
 	vmID := c.getVMID()
+	if hook != nil {
+		defer hook(vmID)()
+	}
 	logger := log.WithFields(
 		log.Fields{
 			"vmID":     vmID,
@@ -167,8 +178,11 @@ func (c *coordinator) orchStartVM(ctx context.Context, image, revision string, e
 	return fi, err
 }
 
-func (c *coordinator) orchLoadInstance(ctx context.Context, snap *snapshotting.Snapshot) (*funcInstance, error) {
+func (c *coordinator) orchLoadInstance(ctx context.Context, snap *snapshotting.Snapshot, hook vmHook) (*funcInstance, error) {
 	vmID := c.getVMID()
+	if hook != nil {
+		defer hook(vmID)()
+	}
 	logger := log.WithFields(
 		log.Fields{
 			"vmID":  vmID,

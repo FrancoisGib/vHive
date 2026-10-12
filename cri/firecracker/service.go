@@ -51,6 +51,9 @@ type FirecrackerService struct {
 	coordinator *coordinator
 
 	vmConfigs map[string]*VMConfig
+
+	// the cgroup of the VM of each user container, in the cgroup of its pod
+	vmCgroups map[string]*vmCgroup
 }
 
 // VMConfig wraps the IP and port of the guest VM
@@ -69,6 +72,7 @@ func NewFirecrackerService(orch *ctriface.Orchestrator) (*FirecrackerService, er
 	fs.stockRuntimeClient = stockRuntimeClient
 	fs.coordinator = newFirecrackerCoordinator(orch)
 	fs.vmConfigs = make(map[string]*VMConfig)
+	fs.vmCgroups = make(map[string]*vmCgroup)
 	return fs, nil
 }
 
@@ -118,8 +122,24 @@ func (fs *FirecrackerService) createUserContainer(ctx context.Context, r *criapi
 		return nil, err
 	}
 
+	// The VM in the cgroup of its pod from its creation: the pod accounts for its boot, CPU and memory, as for a
+	// container. Released if the user container is not created.
+	var watch *vmWatch
+	startWatch := func(vmID string) func() {
+		watch = watchVM(vmID, r.GetSandboxConfig().GetLinux().GetCgroupParent())
+		return watch.stop
+	}
+	created := false
+	defer func() {
+		if watch != nil && !created {
+			if cg, err := watch.result(); err == nil {
+				_ = cg.release()
+			}
+		}
+	}()
+
 	environment := common.ToStringArray(config.GetEnvs())
-	funcInst, err := fs.coordinator.startVMWithEnvironment(context.Background(), guestImage, revision, environment)
+	funcInst, err := fs.coordinator.startVMWithHook(context.Background(), guestImage, revision, environment, startWatch)
 	if err != nil {
 		log.WithError(err).Error("failed to start VM")
 		return nil, err
@@ -148,6 +168,13 @@ func (fs *FirecrackerService) createUserContainer(ctx context.Context, r *criapi
 	if err != nil {
 		log.WithError(err).Error("failed to insert active VM")
 		return nil, err
+	}
+
+	created = true
+	if cg, err := watch.result(); err != nil {
+		log.WithError(err).WithField("vmID", funcInst.VmID).Warn("the VM stays out of the cgroup of its pod")
+	} else {
+		fs.insertVMCgroup(containerdID, cg)
 	}
 
 	return stockResp, stockErr
@@ -179,6 +206,13 @@ func (fs *FirecrackerService) RemoveContainer(ctx context.Context, r *criapi.Rem
 	log.Debugf("RemoveContainer for %q", r.GetContainerId())
 	containerID := r.GetContainerId()
 
+	// The VM out of the cgroup of its pod before the pod is deleted, and before it is stopped (in the background).
+	if cg := fs.popVMCgroup(containerID); cg != nil {
+		if err := cg.release(); err != nil {
+			log.WithError(err).WithField("containerID", containerID).Warn("failed to delete the cgroup of the VM")
+		}
+	}
+
 	go func() {
 		if err := fs.coordinator.stopVM(context.Background(), containerID); err != nil {
 			log.WithError(err).Error("failed to stop microVM")
@@ -186,6 +220,22 @@ func (fs *FirecrackerService) RemoveContainer(ctx context.Context, r *criapi.Rem
 	}()
 
 	return fs.stockRuntimeClient.RemoveContainer(ctx, r)
+}
+
+func (fs *FirecrackerService) insertVMCgroup(containerID string, cg *vmCgroup) {
+	fs.Lock()
+	defer fs.Unlock()
+
+	fs.vmCgroups[containerID] = cg
+}
+
+func (fs *FirecrackerService) popVMCgroup(containerID string) *vmCgroup {
+	fs.Lock()
+	defer fs.Unlock()
+
+	cg := fs.vmCgroups[containerID]
+	delete(fs.vmCgroups, containerID)
+	return cg
 }
 
 func (fs *FirecrackerService) insertVMConfig(podID string, vmConfig *VMConfig) {
