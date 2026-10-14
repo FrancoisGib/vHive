@@ -30,6 +30,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vhive-serverless/vhive/common"
 	"github.com/vhive-serverless/vhive/cri"
+	"github.com/vhive-serverless/vhive/cri/podcgroup"
 	"github.com/vhive-serverless/vhive/ctriface"
 	criapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
@@ -53,7 +54,7 @@ type FirecrackerService struct {
 	vmConfigs map[string]*VMConfig
 
 	// the cgroup of the VM of each user container, in the cgroup of its pod
-	vmCgroups map[string]*vmCgroup
+	vmCgroups map[string]*podcgroup.Cgroup
 }
 
 // VMConfig wraps the IP and port of the guest VM
@@ -72,7 +73,7 @@ func NewFirecrackerService(orch *ctriface.Orchestrator) (*FirecrackerService, er
 	fs.stockRuntimeClient = stockRuntimeClient
 	fs.coordinator = newFirecrackerCoordinator(orch)
 	fs.vmConfigs = make(map[string]*VMConfig)
-	fs.vmCgroups = make(map[string]*vmCgroup)
+	fs.vmCgroups = make(map[string]*podcgroup.Cgroup)
 	return fs, nil
 }
 
@@ -133,7 +134,7 @@ func (fs *FirecrackerService) createUserContainer(ctx context.Context, r *criapi
 	defer func() {
 		if watch != nil && !created {
 			if cg, err := watch.result(); err == nil {
-				_ = cg.release()
+				_ = cg.Release()
 			}
 		}
 	}()
@@ -208,7 +209,7 @@ func (fs *FirecrackerService) RemoveContainer(ctx context.Context, r *criapi.Rem
 
 	// The VM out of the cgroup of its pod before the pod is deleted, and before it is stopped (in the background).
 	if cg := fs.popVMCgroup(containerID); cg != nil {
-		if err := cg.release(); err != nil {
+		if err := cg.Release(); err != nil {
 			log.WithError(err).WithField("containerID", containerID).Warn("failed to delete the cgroup of the VM")
 		}
 	}
@@ -222,14 +223,14 @@ func (fs *FirecrackerService) RemoveContainer(ctx context.Context, r *criapi.Rem
 	return fs.stockRuntimeClient.RemoveContainer(ctx, r)
 }
 
-func (fs *FirecrackerService) insertVMCgroup(containerID string, cg *vmCgroup) {
+func (fs *FirecrackerService) insertVMCgroup(containerID string, cg *podcgroup.Cgroup) {
 	fs.Lock()
 	defer fs.Unlock()
 
 	fs.vmCgroups[containerID] = cg
 }
 
-func (fs *FirecrackerService) popVMCgroup(containerID string) *vmCgroup {
+func (fs *FirecrackerService) popVMCgroup(containerID string) *podcgroup.Cgroup {
 	fs.Lock()
 	defer fs.Unlock()
 

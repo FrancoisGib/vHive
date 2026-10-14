@@ -35,8 +35,10 @@ import (
 	log "github.com/sirupsen/logrus"
 	"github.com/vhive-serverless/vhive/cri"
 	fccri "github.com/vhive-serverless/vhive/cri/firecracker"
+	ukcri "github.com/vhive-serverless/vhive/cri/unikernel"
 	ctriface "github.com/vhive-serverless/vhive/ctriface"
 	hpb "github.com/vhive-serverless/vhive/examples/protobuf/helloworld"
+	"github.com/vhive-serverless/vhive/networking"
 	pb "github.com/vhive-serverless/vhive/proto"
 	"google.golang.org/grpc"
 )
@@ -82,14 +84,17 @@ func main() {
 	criSock = flag.String("criSock", "/etc/vhive-cri/vhive-cri.sock", "Socket address for CRI service")
 	hostIface = flag.String("hostIface", "", "Host net-interface for the VMs to bind to for internet access")
 	netPoolSize = flag.Int("netPoolSize", 10, "Amount of network configs to preallocate in a pool")
-	sandbox := flag.String("sandbox", "firecracker", "Sandbox tech to use, valid options: firecracker")
+	sandbox := flag.String("sandbox", "firecracker", "Sandbox tech to use, valid options: firecracker, unikernel (unikernels booted by firecracker, without firecracker-containerd)")
+	unikernelImages := flag.String("unikernelImages", "/var/lib/vhive/unikernels", "Unikernel images, <dir>/<name>/unikernel.json (sandbox unikernel)")
+	unikernelVMs := flag.String("unikernelVMs", "/var/lib/vhive/unikernel-vms", "Files of the unikernel VMs (sandbox unikernel)")
+	firecrackerBin := flag.String("firecrackerBin", "/usr/local/bin/firecracker", "Firecracker binary (sandbox unikernel)")
 	vethPrefix := flag.String("vethPrefix", "172.17", "Prefix for IP addresses of veth devices, expected subnet is /16")
 	clonePrefix := flag.String("clonePrefix", "172.18", "Prefix for node-accessible IP addresses of uVMs, expected subnet is /16")
 	dockerCredentials := flag.String("dockerCredentials", "", "Docker credentials for pulling images from inside a microVM") // https://github.com/firecracker-microvm/firecracker-containerd/blob/main/docker-credential-mmds
 	flag.Parse()
 
-	if *sandbox != "firecracker" {
-		log.Fatalln("Only \"firecracker\" is supported as a vHive sandboxing technique. Use Kubernetes RuntimeClass for gVisor.")
+	if *sandbox != "firecracker" && *sandbox != "unikernel" {
+		log.Fatalln("Only \"firecracker\" and \"unikernel\" are supported as vHive sandboxing techniques. Use Kubernetes RuntimeClass for gVisor.")
 		return
 	}
 
@@ -146,6 +151,16 @@ func main() {
 		go setupFirecrackerCRI()
 		go orchServe()
 		fwdServe()
+	case "unikernel":
+		network, err := networking.NewNetworkManager(*hostIface, "", *netPoolSize, *vethPrefix, *clonePrefix, false)
+		if err != nil {
+			log.Fatalf("failed to create the network manager: %v", err)
+		}
+		ukService, err := ukcri.NewService(network, *unikernelImages, *unikernelVMs, *firecrackerBin)
+		if err != nil {
+			log.Fatalf("failed to create unikernel service %v", err)
+		}
+		serveCRI(ukService)
 	}
 }
 
@@ -158,6 +173,15 @@ type fwdServer struct {
 }
 
 func setupFirecrackerCRI() {
+	fcService, err := fccri.NewFirecrackerService(orch)
+	if err != nil {
+		log.Fatalf("failed to create firecracker service %v", err)
+	}
+	serveCRI(fcService)
+}
+
+// serveCRI serves the CRI of vHive on its socket, the containers of the functions handled by serv.
+func serveCRI(serv cri.ServiceInterface) {
 	lis, err := net.Listen("unix", *criSock)
 	if err != nil {
 		log.Fatalf("failed to listen: %v", err)
@@ -165,12 +189,7 @@ func setupFirecrackerCRI() {
 
 	s := grpc.NewServer()
 
-	fcService, err := fccri.NewFirecrackerService(orch)
-	if err != nil {
-		log.Fatalf("failed to create firecracker service %v", err)
-	}
-
-	criService, err := cri.NewService(fcService)
+	criService, err := cri.NewService(serv)
 	if err != nil {
 		log.Fatalf("failed to create CRI service %v", err)
 	}

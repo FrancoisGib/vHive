@@ -23,7 +23,9 @@
 package setup
 
 import (
+	"os"
 	"path"
+	"strings"
 	"time"
 
 	configs "github.com/vhive-serverless/vHive/scripts/configs"
@@ -46,14 +48,19 @@ func SetupFirecrackerContainerd() error {
 		return err
 	}
 
-	// Pull LFS in vHive
+	// Pull LFS in vHive, unless its binaries are there: a copy of the repository with its LFS objects, without its
+	// history nor its remote, has nothing to pull
 	utils.WaitPrintf("Pulling LFS in vHive")
 	if err := utils.CheckVHiveRepo(); !utils.CheckErrorWithMsg(err, "Failed to pull LFS in vHive!\n") {
 		return err
 	}
-	_, err = utils.ExecShellCmd("cd %s && git lfs pull", configs.VHive.VHiveRepoPath)
-	if !utils.CheckErrorWithTagAndMsg(err, "Failed to pull LFS in vHive!\n") {
-		return err
+	if lfsBinariesPresent(path.Join(configs.VHive.VHiveRepoPath, "bin")) {
+		utils.SuccessPrintf("the binaries are already there\n")
+	} else {
+		_, err = utils.ExecShellCmd("cd %s && git lfs pull", configs.VHive.VHiveRepoPath)
+		if !utils.CheckErrorWithTagAndMsg(err, "Failed to pull LFS in vHive!\n") {
+			return err
+		}
 	}
 
 	utils.WaitPrintf("Copying required files")
@@ -287,4 +294,30 @@ func SetupZipkin() error {
 	}
 
 	return nil
+}
+
+// lfsBinariesPresent tells whether the files tracked by LFS in a directory are there, instead of their pointers.
+func lfsBinariesPresent(dir string) bool {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	found := false
+	for _, entry := range entries {
+		if !entry.Type().IsRegular() || strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		f, err := os.Open(path.Join(dir, entry.Name()))
+		if err != nil {
+			return false
+		}
+		head := make([]byte, 64)
+		n, _ := f.Read(head)
+		f.Close()
+		if strings.HasPrefix(string(head[:n]), "version https://git-lfs") {
+			return false
+		}
+		found = true
+	}
+	return found
 }

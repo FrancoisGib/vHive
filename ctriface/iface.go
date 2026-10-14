@@ -27,6 +27,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -116,7 +118,7 @@ func (o *Orchestrator) StartVMWithEnvironment(ctx context.Context, vmID, imageNa
 	}
 
 	tStart = time.Now()
-	conf := o.getVMConfig(vm)
+	conf := o.getVMConfig(vm, environmentVariables)
 	_, err = o.fcClient.CreateVM(ctx, conf)
 	startVMMetric.MetricMap[metrics.FcCreateVM] = metrics.ToUS(time.Since(tStart))
 	if err != nil {
@@ -342,16 +344,39 @@ func (o *Orchestrator) getImage(ctx context.Context, imageName string) (*contain
 	return o.imageManager.GetImage(ctx, imageName, o.snapshotter != "proxy")
 }
 
-func (o *Orchestrator) getVMConfig(vm *misc.VM) *proto.CreateVMRequest {
+// The size of the VM of a function, from its environment; without it, the defaults of firecracker-containerd
+// (1 vCPU, 128 MiB).
+const (
+	vmVcpusEnv  = "VM_VCPUS"
+	vmMemoryEnv = "VM_MEMORY_MIB"
+)
+
+// envUint returns the value of key in an environment (KEY=value), 0 when missing or not a number.
+func envUint(env []string, key string) uint32 {
+	for _, kv := range env {
+		if value, ok := strings.CutPrefix(kv, key+"="); ok {
+			if n, err := strconv.ParseUint(value, 10, 32); err == nil {
+				return uint32(n)
+			}
+		}
+	}
+	return 0
+}
+
+// getVMConfig returns the request of a VM; env is the environment of its function, with its size (VM_VCPUS,
+// VM_MEMORY_MIB).
+func (o *Orchestrator) getVMConfig(vm *misc.VM, env []string) *proto.CreateVMRequest {
+	vcpus, memMib := envUint(env, vmVcpusEnv), envUint(env, vmMemoryEnv)
 	kernelArgs := "ro noapic reboot=k panic=1 acpi=off pci=off nomodules systemd.log_color=false systemd.journald.forward_to_console systemd.unit=firecracker.target init=/sbin/overlay-init tsc=reliable quiet ipv6.disable=1 console=ttyS0"
 
 	return &proto.CreateVMRequest{
 		VMID:           vm.ID,
 		TimeoutSeconds: 100,
 		KernelArgs:     kernelArgs,
+		// 0: the defaults of firecracker-containerd (1 vCPU, 128 MiB)
 		MachineCfg: &proto.FirecrackerMachineConfiguration{
-			// VcpuCount:  1,
-			// MemSizeMib: 512,
+			VcpuCount:  vcpus,
+			MemSizeMib: memMib,
 		},
 		NetworkInterfaces: []*proto.FirecrackerNetworkInterface{{
 			AllowMMDS: true,
@@ -525,7 +550,7 @@ func (o *Orchestrator) LoadSnapshot(ctx context.Context, vmID string, snap *snap
 		}
 	}()
 
-	conf := o.getVMConfig(vm)
+	conf := o.getVMConfig(vm, nil)
 	conf.LoadSnapshot = true
 	conf.SnapshotPath = snap.GetSnapshotFilePath()
 	configureSnapshotMemoryBackend(conf, "File", snap.GetMemFilePath())
