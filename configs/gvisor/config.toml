@@ -2,9 +2,6 @@ version = 3
 
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc]
   runtime_type = 'io.containerd.runsc.v1'
-  runtime_args = [
-      "--systrap-disable-fast-path"
-  ]
 
 # The options of runsc (runsc.toml, installed by setup_gvisor_runtime): its cgroups in those of the pods.
 [plugins.'io.containerd.cri.v1.runtime'.containerd.runtimes.runsc.options]

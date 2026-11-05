@@ -3,5 +3,9 @@
 # The kubelet of vHive uses the systemd cgroup driver: containerd gives runsc the cgroups of the pods as systemd ones
 # (kubepods-besteffort-pod<uid>.slice:cri-containerd:<id>). Without systemd-cgroup, runsc reads them as cgroupfs paths
 # and creates its cgroups out of the pods, at the root: the pods would not account for their sandboxes (Sentry, gofer).
+#
+# Each key of runsc_config is given to runsc as --<key>=<value> (containerd has no field for the arguments of a runtime).
+# systrap-disable-fast-path: the Sentry and the stub threads of Systrap no longer spin while waiting for each other.
 [runsc_config]
   systemd-cgroup = "true"
+  systrap-disable-fast-path = "true"
