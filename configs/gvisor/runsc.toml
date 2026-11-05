@@ -8,4 +8,5 @@
 # systrap-disable-fast-path: the Sentry and the stub threads of Systrap no longer spin while waiting for each other.
 [runsc_config]
   systemd-cgroup = "true"
-  systrap-disable-fast-path = "true"
+  #systrap-disable-fast-path = "true"
+  #platform = "kvm"
