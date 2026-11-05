@@ -128,30 +128,18 @@ func InstallRunc() error {
 	return nil
 }
 
-// Download and install runsc
+// Download and install runsc and its containerd shim, from the Debian package of the gVisor release: recent runsc
+// (20261102) runs binaries of gvisor-bin/, next to it (/usr/bin/gvisor-bin), and runsc alone is no longer published
+// after 20260817. The package also installs an example /etc/containerd/runsc.toml, replaced by that of configs/gvisor after.
 func InstallRunsc() error {
-	// Download runsc
-	runscFilePath, err := utils.DownloadToTmpDir(configs.System.GetRunscDownloadUrl())
+	debFilePath, err := utils.DownloadToTmpDir(configs.System.GetRunscDownloadUrl())
 	if !utils.CheckErrorWithMsg(err, "Failed to download runsc!\n") {
 		return err
 	}
-	// Grant permission and move the executable
-	_, err = utils.ExecShellCmd("sudo chmod a+rx %s && sudo mv %s /usr/local/bin", runscFilePath, runscFilePath)
+	// The runsc and the shim installed alone in /usr/local/bin by older setups would come first in the PATH.
+	// --force-confold: dpkg keeps a runsc.toml already there instead of asking.
+	_, err = utils.ExecShellCmd("sudo rm -f /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1 && sudo DEBIAN_FRONTEND=noninteractive dpkg -i --force-confold %s", debFilePath)
 	if !utils.CheckErrorWithTagAndMsg(err, "Failed to install runsc!\n") {
-		return err
-	}
-	return nil
-}
-
-func InstallRunscContainerdShim() error {
-	// Download runsc containerd shim
-	shimFilePath, err := utils.DownloadToTmpDir(configs.System.GetRunscContainerdShimDownloadUrl())
-	if !utils.CheckErrorWithMsg(err, "Failed to download runsc containerd shim!\n") {
-		return err
-	}
-	// Grant permission and move the executable
-	_, err = utils.ExecShellCmd("sudo chmod a+rx %s && sudo mv %s /usr/local/bin/containerd-shim-runsc-v1", shimFilePath, shimFilePath)
-	if !utils.CheckErrorWithTagAndMsg(err, "Failed to install runsc containerd shim!\n") {
 		return err
 	}
 	return nil

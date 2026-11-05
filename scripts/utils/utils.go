@@ -78,7 +78,7 @@ func DownloadToTmpDir(urlTemplate string, pars ...any) (string, error) {
 		return filePath, err
 	}
 	// Download file
-	_, err := ExecShellCmd("curl -sSL --output %s %s", filePath, url)
+	_, err := ExecShellCmd("curl -fsSL --output %s %s", filePath, url)
 	return filePath, err
 }
 

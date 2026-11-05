@@ -41,9 +41,8 @@ type SystemEnvironmentStruct struct {
 	CniPluginsVersion                   string
 	CniPluginsDownloadUrlTemplate       string
 
-	RunscVersion                           string
-	RunscDownloadUrlTemplate               string
-	RunscContainerdShimDownloadUrlTemplate string
+	RunscVersion             string
+	RunscDownloadUrlTemplate string
 
 	KubeVersion               string
 	KubeRepoUrl               string
@@ -92,28 +91,8 @@ func (system *SystemEnvironmentStruct) GetRuncDownloadUrl() string {
 	return fmt.Sprintf(system.RuncDownloadUrlTemplate, system.RuncVersion, system.CurrentArch)
 }
 
+// The Debian package of the gVisor release, in the pool of its apt repository: binary-amd64 or binary-arm64, the
+// architectures of Go.
 func (system *SystemEnvironmentStruct) GetRunscDownloadUrl() string {
-	unameArch := system.CurrentArch
-	switch unameArch {
-	case "amd64":
-		unameArch = "x86_64"
-	case "arm64":
-		unameArch = "aarch_64"
-	default:
-	}
-
-	return fmt.Sprintf(system.RunscDownloadUrlTemplate, system.RunscVersion, unameArch)
-}
-
-func (system *SystemEnvironmentStruct) GetRunscContainerdShimDownloadUrl() string {
-	unameArch := system.CurrentArch
-	switch unameArch {
-	case "amd64":
-		unameArch = "x86_64"
-	case "arm64":
-		unameArch = "aarch_64"
-	default:
-	}
-
-	return fmt.Sprintf(system.RunscContainerdShimDownloadUrlTemplate, system.RunscVersion, unameArch)
+	return fmt.Sprintf(system.RunscDownloadUrlTemplate, system.RunscVersion, system.CurrentArch)
 }

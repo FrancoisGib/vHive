@@ -147,15 +147,9 @@ func SetupFirecrackerContainerd() error {
 
 // Set up gVisor runsc runtime for stock containerd.
 func SetupGvisorRuntime() error {
-	utils.WaitPrintf("Installing runsc")
+	utils.WaitPrintf("Installing runsc and its containerd shim")
 	if err := InstallRunsc(); err != nil {
 		utils.ErrorPrintf("Failed to install runsc!\n")
-		return err
-	}
-
-	utils.WaitPrintf("Installing runsc containerd shim")
-	if err := InstallRunscContainerdShim(); err != nil {
-		utils.ErrorPrintf("Failed to install containerd runsc shim!\n")
 		return err
 	}
 
